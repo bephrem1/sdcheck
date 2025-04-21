@@ -1,7 +1,7 @@
 import chalk from "chalk";
 import type { Command } from "commander";
 import inquirer from "inquirer";
-import { indexVolume } from "../helpers/file";
+import { findMissingContents, indexVolume } from "../helpers/file";
 import { listVolumes } from "../helpers/fs";
 
 export async function registerCheck(program: Command) {
@@ -19,10 +19,26 @@ async function _check() {
 	const volumes = await getVolumes();
 
 	// (1) index video & image files on the sd
-	const sdIndex = await indexVolume(volumes.sd.path, { computeHashes: false });
+	const sdIndex = await indexVolume({
+		volumeName: volumes.sd.name,
+		volumeRoot: volumes.sd.path,
+		computeHashes: false,
+	});
 
-	// (2) make sure it’s on any given one of the hard drives
-	co;
+	// (2) index each hard drive (w/o computing contents hash, it’s slow)
+	const hdIndexes = await Promise.all(
+		volumes.hds.map((hd) =>
+			indexVolume({
+				volumeName: hd.name,
+				volumeRoot: hd.path,
+				computeHashes: false,
+			}),
+		),
+	);
+
+	// (3) find missing contents
+	const { missing } = await findMissingContents({ sdIndex, hdIndexes });
+	console.log(missing);
 }
 
 async function getVolumes(): Promise<{
