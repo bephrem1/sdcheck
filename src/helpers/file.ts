@@ -62,7 +62,7 @@ export async function indexVolume({
   };
   const updateProgress = () => {
     const totalGB = bytesToGB(totalBytesIndexed).toFixed(2);
-    spinner.text = `${volumeName}: ${currentFile} ┊ ${totalFilesIndexed} files (${totalGB} GB) ┊ ${formatElapsedTime()} elapsed`;
+    spinner.text = `${volumeName} ${chalk.gray(`(${formatElapsedTime()})`)}: ${currentFile} ┊ ${totalFilesIndexed} files (${totalGB} GB)`;
   };
 
   async function walk(currentPath: string) {
@@ -137,7 +137,7 @@ export async function indexVolume({
   const elapsedTime = formatElapsedTime();
 
   spinner.succeed(
-    `Scanned ${volumeName} ${chalk.gray(`(in ${elapsedTime})`)} ┊ ${totalFilesIndexed} files • ${totalGB} GB across ${totalVideosIndexed} videos & ${totalImagesIndexed} images`,
+    `Scanned ${volumeName} ${chalk.gray(`(in ${elapsedTime})`)} ┊ ${totalFilesIndexed} files • ${totalGB} GB (${totalVideosIndexed} videos & ${totalImagesIndexed} images)`,
   );
 
   return { videos, images, volumeName, volumeRoot };
