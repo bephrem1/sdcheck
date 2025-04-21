@@ -1,23 +1,23 @@
 {
-	"name": "sdcheck",
-	"module": "src/index.ts",
-	"type": "module",
-	"scripts": {
-		"check": "bun src/index.ts",
-		"dev": "bun src/index.ts dev",
-		"format": "biome check . --write"
-	},
-	"devDependencies": {
-		"@biomejs/biome": "^1.9.4",
-		"@types/bun": "latest"
-	},
-	"peerDependencies": {
-		"typescript": "^5.0.0"
-	},
-	"dependencies": {
-		"chalk": "^5.4.1",
-		"commander": "^13.1.0",
-		"inquirer": "^12.5.2",
-		"ora": "^8.2.0"
-	}
+  "name": "sdcheck",
+  "module": "src/index.ts",
+  "type": "module",
+  "scripts": {
+    "check": "bun src/index.ts",
+    "dev": "bun src/index.ts dev",
+    "format": "biome check . --write"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^1.9.4",
+    "@types/bun": "latest"
+  },
+  "peerDependencies": {
+    "typescript": "^5.0.0"
+  },
+  "dependencies": {
+    "chalk": "^5.4.1",
+    "commander": "^13.1.0",
+    "inquirer": "^12.5.2",
+    "ora": "^8.2.0"
+  }
 }
