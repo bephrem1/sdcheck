@@ -47,4 +47,11 @@ export async function registerDev(program: Command) {
       }),
     );
   });
+
+  program.command("dev2").action(async () => {
+    await indexVolume({
+      volumeName: "HD",
+      volumeRoot: "/Volumes/Toshiba 4TB",
+    });
+  });
 }

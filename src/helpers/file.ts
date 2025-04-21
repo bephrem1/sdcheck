@@ -1,5 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
+import chalk from "chalk";
+import ora from "ora";
 import { getFileSize } from "./fs";
 
 const IGNORE_SD_CARD_FOLDERS_NAMED = [
@@ -38,6 +40,31 @@ export async function indexVolume({
 
   let totalFilesIndexed = 0;
   let totalBytesIndexed = 0;
+  let totalVideosIndexed = 0;
+  let totalImagesIndexed = 0;
+  let currentFile = "";
+
+  // progress spinner
+  const spinner = ora({
+    text: `Connecting to ${volumeName}...`,
+    color: "white",
+  }).start();
+
+  // start timer
+  const startTime = Date.now();
+
+  // live indicator formatting + update
+  const formatElapsedTime = () => {
+    const elapsedSeconds = Math.floor((Date.now() - startTime) / 1000);
+    const minutes = Math.floor(elapsedSeconds / 60);
+    const seconds = elapsedSeconds % 60;
+    return minutes > 0 ? `${minutes}m ${seconds}s` : `${seconds}s`;
+  };
+  const updateProgress = () => {
+    const totalGB = bytesToGB(totalBytesIndexed).toFixed(2);
+    spinner.text = `${volumeName}: ${currentFile} ┊ ${totalFilesIndexed} files (${totalGB} GB) ┊ ${formatElapsedTime()} elapsed`;
+  };
+
   async function walk(currentPath: string) {
     const entries = fs.readdirSync(currentPath, { withFileTypes: true });
 
@@ -62,6 +89,10 @@ export async function indexVolume({
         const name = entry.name;
 
         if ([...IMAGE_EXTS, ...VIDEO_EXTS].includes(ext)) {
+          // Update current file being processed
+          currentFile = name;
+          updateProgress();
+
           const fileId = await getFileId(fullPath);
 
           const fileObj: FileInfo = {
@@ -79,17 +110,21 @@ export async function indexVolume({
             fileObj.isImage = true;
 
             images[fileId] = fileObj;
+            totalImagesIndexed += 1;
           } else {
             fileObj.isVideo = true;
             fileObj.isImage = false;
 
             videos[fileId] = fileObj;
+            totalVideosIndexed += 1;
           }
-          console.log("indexed", fileObj.name);
 
           // collect run metadata
           totalFilesIndexed += 1;
           totalBytesIndexed += fileObj.sizeBytes;
+
+          // Update progress display
+          updateProgress();
         }
       }
     }
@@ -97,8 +132,13 @@ export async function indexVolume({
 
   await walk(volumeRoot);
 
-  console.log("total files indexed", totalFilesIndexed);
-  console.log("total bytes indexed", totalBytesIndexed);
+  // Final update with complete information
+  const totalGB = bytesToGB(totalBytesIndexed).toFixed(2);
+  const elapsedTime = formatElapsedTime();
+
+  spinner.succeed(
+    `Scanned ${volumeName} ${chalk.gray(`(in ${elapsedTime})`)} ┊ ${totalFilesIndexed} files • ${totalGB} GB across ${totalVideosIndexed} videos & ${totalImagesIndexed} images`,
+  );
 
   return { videos, images, volumeName, volumeRoot };
 }
