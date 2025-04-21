@@ -62,7 +62,7 @@ export async function indexVolume({
   };
   const updateProgress = () => {
     const totalGB = bytesToGB(totalBytesIndexed).toFixed(2);
-    spinner.text = `${volumeName} ${chalk.gray(`(${formatElapsedTime()})`)}: ${currentFile} ┊ ${totalFilesIndexed} files (${totalGB} GB)`;
+    spinner.text = `Scanning ${volumeName} ${chalk.gray(`(${formatElapsedTime()})`)}: ${chalk.yellow(currentFile)} ${chalk.gray("┊")} ${totalFilesIndexed} files ${chalk.gray(`(${totalGB} GB)`)}`;
   };
 
   async function walk(currentPath: string) {
