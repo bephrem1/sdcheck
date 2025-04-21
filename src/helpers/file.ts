@@ -137,7 +137,7 @@ export async function indexVolume({
   const elapsedTime = formatElapsedTime();
 
   spinner.succeed(
-    `Scanned ${volumeName} ${chalk.gray(`(in ${elapsedTime})`)} ┊ ${totalFilesIndexed} files • ${totalGB} GB (${totalVideosIndexed} videos & ${totalImagesIndexed} images)`,
+    `Scanned ${volumeName} ${chalk.gray(`(in ${elapsedTime})`)} ┊ ${totalFilesIndexed} files, ${totalGB} GB (${totalVideosIndexed} videos, ${totalImagesIndexed} images)`,
   );
 
   return { videos, images, volumeName, volumeRoot };
