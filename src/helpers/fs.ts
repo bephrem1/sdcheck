@@ -12,3 +12,10 @@ export async function listVolumes(): Promise<{ name: string; path: string }[]> {
 		.filter((name) => !IGNORE_VOLUMES_NAMED.includes(name))
 		.map((name) => ({ name, path: path.join(VOLUMES_PATH, name) }));
 }
+
+export async function getFileSize(filePath: string): Promise<number> {
+	const file = Bun.file(filePath);
+	const stats = await file.stat();
+
+	return stats.size;
+}

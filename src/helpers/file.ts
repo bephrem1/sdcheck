@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { getFileSize } from "./fs";
 
 const IGNORE_SD_CARD_FOLDERS_NAMED = [
 	"THMBNL", // ignore Sony thumbnail image files they keep for video
@@ -8,18 +9,15 @@ const IGNORE_SD_CARD_FOLDERS_NAMED = [
 const IMAGE_EXTS = [".jpg", ".jpeg", ".png", ".heic", ".tiff", ".webp"];
 const VIDEO_EXTS = [".mp4", ".mov", ".avi", ".mkv", ".m4v", ".wmv"];
 
-// note: we can’t rely on SD card derived filenames because a card will reset it’s naming when formatted,
-//       so we derive file identifiers from shallow hashes we take from the start of files. ideally we have
-//       a more clever fingerprinting strategy here, but collision odds are very low. (and the error case is
-//       that we have a false positive that a file is missing or corrupt)
-const DEFAULT_PARTIAL_HASH_BYTES = 16 * 1024; // 16 KB
-
 type FileInfo = {
 	id: string;
 	name: string;
 	path: string;
+	sizeBytes: number;
 	isVideo: boolean;
 	isImage: boolean;
+
+	volumeName: string;
 };
 type DriveIndex = {
 	videos: { [key: string]: FileInfo };
@@ -38,6 +36,8 @@ export async function indexVolume({
 	const videos: { [key: string]: FileInfo } = {};
 	const images: { [key: string]: FileInfo } = {};
 
+	let totalFilesIndexed = 0;
+	let totalBytesIndexed = 0;
 	async function walk(currentPath: string) {
 		const entries = fs.readdirSync(currentPath, { withFileTypes: true });
 
@@ -62,24 +62,34 @@ export async function indexVolume({
 				const name = entry.name;
 
 				if ([...IMAGE_EXTS, ...VIDEO_EXTS].includes(ext)) {
+					const fileId = await getFileId(fullPath);
+
 					const fileObj: FileInfo = {
-						id: await getFileId(fullPath),
+						id: fileId,
 						name,
 						path: fullPath,
+						sizeBytes: await getFileSize(fullPath),
 						isVideo: false,
 						isImage: false,
+						volumeName,
 					};
 
 					if (IMAGE_EXTS.includes(ext)) {
 						fileObj.isVideo = false;
 						fileObj.isImage = true;
+
+						images[fileId] = fileObj;
 					} else {
 						fileObj.isVideo = true;
 						fileObj.isImage = false;
-					}
 
-					videos[name] = fileObj;
-					console.log(`indexed ${name}`);
+						videos[fileId] = fileObj;
+					}
+					console.log("indexed", fileObj.name);
+
+					// collect run metadata
+					totalFilesIndexed += 1;
+					totalBytesIndexed += fileObj.sizeBytes;
 				}
 			}
 		}
@@ -87,86 +97,96 @@ export async function indexVolume({
 
 	await walk(volumeRoot);
 
+	console.log("total files indexed", totalFilesIndexed);
+	console.log("total bytes indexed", totalBytesIndexed);
+
 	return { videos, images, volumeName, volumeRoot };
 }
 
-// note: this assumes the file names have not changed on the HD. if we assume they can
-//       change, we’d need to hash every file on the HD (very slow) to then have an identifying
-//       handle to find the sd-side file.
 export async function findMissingContents({
 	sdIndex,
 	hdIndexes,
 }: {
 	sdIndex: DriveIndex;
 	hdIndexes: Array<DriveIndex>;
-}): Promise<{ missing: Array<FileInfo> }> {
-	const missingVideos: Array<FileInfo> = [];
-	const missingImages: Array<FileInfo> = [];
+}): Promise<{
+	missing: Array<FileInfo>;
+	potentiallyCorrupted: Array<FileInfo>;
+}> {
+	const missingFiles: Array<FileInfo> = [];
+	const potentiallyCorruptFiles: Array<FileInfo> = [];
 
-	// double for loops top-level here are fine (n < 5), we could combine the separate hd indexes into 1 flat thing but it’s fine.
-	for (const video of Object.values(sdIndex.videos)) {
-		for (const hdIndex of hdIndexes) {
-			const found = Object.hasOwn(hdIndex.videos, video.name);
+	// TODO: a bit inefficient but collect into merged object (probably want to undo the videos/images naming separation)
+	const sdFilesToFind: { [key: string]: FileInfo } = {
+		...sdIndex.videos,
+		...sdIndex.images,
+	};
+	const allHDFiles: { [key: string]: FileInfo } = hdIndexes.reduce(
+		(acc, hdIndex) => {
+			return {
+				// biome-ignore lint/performance/noAccumulatingSpread: combining indexes
+				...acc,
+				...hdIndex.videos,
+				...hdIndex.images,
+			};
+		},
+		{},
+	);
 
-			if (found) {
-				const sdSideHash = getFileHash(video.path);
-				const hdSideHash = getFileHash(hdIndex.videos[video.name].path);
-
-				if (sdSideHash !== hdSideHash) {
-					throw new Error(
-						`Hash mismatch for video ${video.name} on SD and HD. Potentially corrupt, recheck copy.`,
-					);
-				}
-			} else {
-				missingVideos.push(video);
-			}
+	for (const [fileId, sdFile] of Object.entries(sdFilesToFind)) {
+		// (0) check if file exists on any drive
+		const foundOnSomeHD = Object.hasOwn(allHDFiles, fileId);
+		if (!foundOnSomeHD) {
+			missingFiles.push(sdFile);
+			continue;
 		}
-	}
-	for (const image of Object.values(sdIndex.images)) {
-		for (const hdIndex of hdIndexes) {
-			const found = Object.hasOwn(hdIndex.images, image.name);
 
-			if (found) {
-				const sdSideHash = getFileHash(image.path);
-				const hdSideHash = getFileHash(hdIndex.images[image.name].path);
+		// (1) ensure contents match bit-for-bit (compare full file hashes)
+		const hdFile = allHDFiles[fileId];
+		const sdSideHash = await getFullFileHash(sdFile.path);
+		const hdSideHash = await getFullFileHash(hdFile.path);
 
-				if (sdSideHash !== hdSideHash) {
-					throw new Error(
-						`Hash mismatch for image ${image.name} on SD and HD. Potentially corrupt, recheck copy.`,
-					);
-				}
-			} else {
-				missingImages.push(image);
-			}
+		console.log(`≈ comparing [${sdFile.name}] (SD) to [${hdFile.name}] HD`);
+		if (sdSideHash !== hdSideHash) {
+			potentiallyCorruptFiles.push(sdFile);
 		}
+		console.log(`    ✔ match [${sdFile.name}]`, sdSideHash);
 	}
 
 	return {
-		missing: [...missingVideos, ...missingImages],
+		missing: missingFiles,
+		potentiallyCorrupted: potentiallyCorruptFiles,
 	};
 }
 
+// note: we can’t rely on SD card derived filenames because a card will reset it’s naming when formatted,
+//       so we derive file identifiers by sampling regions of the file + hashing. ideally we have a more
+//       clever fingerprinting strategy here, but collision odds are very low. (and the error case is
+//       that we have a false positive that a file is missing or corrupt)
+const SAMPLE_REGION_CHUNK_SIZE = 256 * 1024; // 256 KB per region
+const TOTAL_SAMPLE_REGIONS = 10;
+/*
+  |---------|---------|---------|---------|---------|---------|---------|---------|---------|---------|
+  ^         ^         ^         ^         ^         ^         ^         ^         ^         ^
+  0%       10%       20%       30%       40%       50%       60%       70%       80%       90%
+*/
+
 export async function getFileId(
 	filePath: string,
-	maxBytes: number = DEFAULT_PARTIAL_HASH_BYTES,
+	chunkSize: number = SAMPLE_REGION_CHUNK_SIZE,
+	regions: number = TOTAL_SAMPLE_REGIONS,
 ): Promise<string> {
 	const hasher = new Bun.CryptoHasher("sha256");
-	const stream = Bun.file(filePath).stream();
-	const reader = stream.getReader();
+	const file = Bun.file(filePath);
+	const fileSize = (await file.stat()).size;
 
-	let totalRead = 0;
-	while (totalRead < maxBytes) {
-		const { done, value } = await reader.read();
-		if (done || !value) break;
+	const regionSpacing = Math.floor(fileSize / regions);
 
-		const remaining = maxBytes - totalRead;
-		const chunk =
-			value.byteLength > remaining ? value.subarray(0, remaining) : value;
-
-		hasher.update(chunk);
-		totalRead += chunk.byteLength;
-
-		if (chunk.byteLength < value.byteLength) break; // we only needed a slice of this chunk
+	for (let i = 0; i < regions; i++) {
+		const offset = i * regionSpacing;
+		const readSize = Math.min(chunkSize, fileSize - offset);
+		const slice = await file.slice(offset, offset + readSize).arrayBuffer();
+		hasher.update(new Uint8Array(slice));
 	}
 
 	return hasher.digest("hex");
@@ -184,4 +204,8 @@ export async function getFullFileHash(filePath: string): Promise<string> {
 	}
 
 	return hasher.digest("hex");
+}
+
+export function bytesToGB(bytes: number): number {
+	return bytes / (1024 * 1024 * 1024);
 }
