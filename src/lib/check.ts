@@ -18,27 +18,25 @@ async function _check() {
 	// (0) get volumes to check
 	const volumes = await getVolumes();
 
-	// (1) index video & image files on the sd
+	// (1) index sd
 	const sdIndex = await indexVolume({
 		volumeName: volumes.sd.name,
 		volumeRoot: volumes.sd.path,
-		computeHashes: false,
 	});
 
-	// (2) index each hard drive (w/o computing contents hash, it’s slow)
+	// (2) index each hd
 	const hdIndexes = await Promise.all(
 		volumes.hds.map((hd) =>
 			indexVolume({
 				volumeName: hd.name,
 				volumeRoot: hd.path,
-				computeHashes: false,
 			}),
 		),
 	);
 
 	// (3) find missing contents
 	const { missing } = await findMissingContents({ sdIndex, hdIndexes });
-	console.log(missing);
+	// console.log(missing);
 }
 
 async function getVolumes(): Promise<{

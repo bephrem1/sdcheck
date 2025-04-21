@@ -8,7 +8,19 @@ const IGNORE_SD_CARD_FOLDERS_NAMED = [
 const IMAGE_EXTS = [".jpg", ".jpeg", ".png", ".heic", ".tiff", ".webp"];
 const VIDEO_EXTS = [".mp4", ".mov", ".avi", ".mkv", ".m4v", ".wmv"];
 
-type FileInfo = { name: string; path: string; hash?: string | null };
+// note: we can’t rely on SD card derived filenames because a card will reset it’s naming when formatted,
+//       so we derive file identifiers from shallow hashes we take from the start of files. ideally we have
+//       a more clever fingerprinting strategy here, but collision odds are very low. (and the error case is
+//       that we have a false positive that a file is missing or corrupt)
+const DEFAULT_PARTIAL_HASH_BYTES = 16 * 1024; // 16 KB
+
+type FileInfo = {
+	id: string;
+	name: string;
+	path: string;
+	isVideo: boolean;
+	isImage: boolean;
+};
 type DriveIndex = {
 	videos: { [key: string]: FileInfo };
 	images: { [key: string]: FileInfo };
@@ -19,11 +31,9 @@ type DriveIndex = {
 export async function indexVolume({
 	volumeRoot,
 	volumeName,
-	computeHashes,
 }: {
 	volumeRoot: string;
 	volumeName: string;
-	computeHashes?: boolean;
 }): Promise<DriveIndex> {
 	const videos: { [key: string]: FileInfo } = {};
 	const images: { [key: string]: FileInfo } = {};
@@ -44,22 +54,32 @@ export async function indexVolume({
 
 				await walk(fullPath);
 			} else if (entry.isFile()) {
+				if (entry.name.startsWith(".")) {
+					continue; // ignore hidden metadata files
+				}
+
 				const ext = path.extname(entry.name).toLowerCase();
 				const name = entry.name;
 
 				if ([...IMAGE_EXTS, ...VIDEO_EXTS].includes(ext)) {
-					const fileObj: FileInfo = { name, path: fullPath };
-					if (computeHashes) {
-						const hash = await getFileHash(fullPath);
-						fileObj.hash = hash;
-					}
+					const fileObj: FileInfo = {
+						id: await getFileId(fullPath),
+						name,
+						path: fullPath,
+						isVideo: false,
+						isImage: false,
+					};
 
 					if (IMAGE_EXTS.includes(ext)) {
-						images[name] = fileObj;
+						fileObj.isVideo = false;
+						fileObj.isImage = true;
 					} else {
-						videos[name] = fileObj;
+						fileObj.isVideo = true;
+						fileObj.isImage = false;
 					}
-					console.log("index");
+
+					videos[name] = fileObj;
+					console.log(`indexed ${name}`);
 				}
 			}
 		}
@@ -126,7 +146,33 @@ export async function findMissingContents({
 	};
 }
 
-export async function getFileHash(filePath: string): Promise<string> {
+export async function getFileId(
+	filePath: string,
+	maxBytes: number = DEFAULT_PARTIAL_HASH_BYTES,
+): Promise<string> {
+	const hasher = new Bun.CryptoHasher("sha256");
+	const stream = Bun.file(filePath).stream();
+	const reader = stream.getReader();
+
+	let totalRead = 0;
+	while (totalRead < maxBytes) {
+		const { done, value } = await reader.read();
+		if (done || !value) break;
+
+		const remaining = maxBytes - totalRead;
+		const chunk =
+			value.byteLength > remaining ? value.subarray(0, remaining) : value;
+
+		hasher.update(chunk);
+		totalRead += chunk.byteLength;
+
+		if (chunk.byteLength < value.byteLength) break; // we only needed a slice of this chunk
+	}
+
+	return hasher.digest("hex");
+}
+
+export async function getFullFileHash(filePath: string): Promise<string> {
 	const hasher = new Bun.CryptoHasher("sha256");
 	const stream = Bun.file(filePath).stream();
 	const reader = stream.getReader();
