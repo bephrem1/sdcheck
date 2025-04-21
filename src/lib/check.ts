@@ -25,6 +25,7 @@ async function _check() {
   });
 
   // (2) index each hd
+  // TODO: cache this index to a local file so we don’t recompute it everytime we reanalyze
   const hdIndexes = await Promise.all(
     volumes.hds.map((hd) =>
       indexVolume({
