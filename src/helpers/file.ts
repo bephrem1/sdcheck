@@ -173,11 +173,59 @@ export async function findMissingContents({
     {},
   );
 
+  // progress spinner
+  const spinner = ora({
+    text: "Checking for missing files...",
+    color: "white",
+  }).start();
+
+  // start timer
+  const startTime = Date.now();
+
+  let filesChecked = 0;
+  let totalFiles = Object.keys(sdFilesToFind).length;
+  let currentFile = "";
+  let lastMatchStatus = "";
+
+  // live indicator formatting + update
+  const formatElapsedTime = () => {
+    const elapsedSeconds = Math.floor((Date.now() - startTime) / 1000);
+    const minutes = Math.floor(elapsedSeconds / 60);
+    const seconds = elapsedSeconds % 60;
+    return minutes > 0 ? `${minutes}m ${seconds}s` : `${seconds}s`;
+  };
+  const updateProgress = () => {
+    const percentage = Math.floor((filesChecked / totalFiles) * 100);
+    let statusIndicator = "";
+
+    if (lastMatchStatus === "matching") {
+      statusIndicator = chalk.yellow("⟳ Comparing");
+    } else if (lastMatchStatus === "matched") {
+      statusIndicator = chalk.green("✓ Matched");
+    } else if (lastMatchStatus === "missing") {
+      statusIndicator = chalk.red("✗ Missing");
+    } else if (lastMatchStatus === "corrupted") {
+      statusIndicator = chalk.red("⚠ Corrupted");
+    }
+
+    spinner.text = `Checking files ${chalk.gray(`(${formatElapsedTime()})`)}: ${statusIndicator} ${chalk.yellow(currentFile)} ${chalk.gray("┊")} ${filesChecked}/${totalFiles} files ${chalk.gray(`(${percentage}%)`)}`;
+  };
+
   for (const [fileId, sdFile] of Object.entries(sdFilesToFind)) {
+    // update progress
+    currentFile = sdFile.name;
+    filesChecked += 1;
+    lastMatchStatus = "matching";
+    updateProgress();
+
     // (0) check if file exists on any drive
     const foundOnSomeHD = Object.hasOwn(allHDFiles, fileId);
     if (!foundOnSomeHD) {
+      lastMatchStatus = "missing";
+      updateProgress();
       missingFiles.push(sdFile);
+
+      await new Promise((resolve) => setTimeout(resolve, 100)); // brief pause to show the missing status
       continue;
     }
 
@@ -186,12 +234,28 @@ export async function findMissingContents({
     const sdSideHash = await getFullFileHash(sdFile.path);
     const hdSideHash = await getFullFileHash(hdFile.path);
 
-    console.log(`≈ comparing [${sdFile.name}] (SD) to [${hdFile.name}] HD`);
     if (sdSideHash !== hdSideHash) {
+      lastMatchStatus = "corrupted";
+      updateProgress();
       potentiallyCorruptFiles.push(sdFile);
+
+      // brief pause to show the corrupted status
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    } else {
+      // Show success with green indicator
+      lastMatchStatus = "matched";
+      updateProgress();
+
+      // brief flash of green success
+      await new Promise((resolve) => setTimeout(resolve, 50));
     }
-    console.log(`    ✔ match [${sdFile.name}]`, sdSideHash);
   }
+
+  // final update
+  const elapsedTime = formatElapsedTime();
+  spinner.succeed(
+    `Checked ${totalFiles} files ${chalk.gray(`(in ${elapsedTime})`)} ┊ ${missingFiles.length} missing, ${potentiallyCorruptFiles.length} potentially corrupted`,
+  );
 
   return {
     missing: missingFiles,

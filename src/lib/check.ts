@@ -36,8 +36,8 @@ async function _check() {
   );
 
   // (3) find missing contents
-  const { missing } = await findMissingContents({ sdIndex, hdIndexes });
-  console.log(missing);
+  const result = await findMissingContents({ sdIndex, hdIndexes });
+  console.log(result);
 }
 
 async function getVolumes(): Promise<{
