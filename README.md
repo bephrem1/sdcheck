@@ -9,7 +9,9 @@ bun install
 To run:
 
 ```bash
-bun run index.ts
+bun check
 ```
 
-This project was created using `bun init` in bun v1.1.33. [Bun](https://bun.sh) is a fast all-in-one JavaScript runtime.
+<br />
+
+> TODO: I need to publish this as an installable binary so it’s easier to run (without knowing anything about bun, etc). Until then I’m just running it locally.
